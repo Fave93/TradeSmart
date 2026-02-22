@@ -1,35 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Portfolio - TradeSmart</title>
+  <link rel="stylesheet" href="../css/styles.css" />
 </head>
 <body>
+<div class="container">
 
-<nav>
-  <a href="../index.html">Home</a> |
-  <a href="market.html">Market</a> |
-  <a href="portfolio.html">Portfolio</a> |
-  <a href="transactions.html">Transactions</a> |
-  <a href="login.html">Login</a> |
-  <a href="register.html">Register</a> |
-  <a href="admin-create-stock.html">Admin: Create Stock</a> |
-  <a href="admin-market-hours.html">Admin: Market Hours</a> |
-  <a href="admin-market-schedule.html">Admin: Schedule</a>
-</nav>
+  <nav>
+    <a href="../index.html">Home</a> |
+    <a href="market.html">Market</a> |
+    <a href="portfolio.html">Portfolio</a> |
+    <a href="transactions.html">Transactions</a> |
+    <a href="login.html">Login</a> |
+    <a href="register.html">Register</a>
+  </nav>
 
-<hr>
+  <hr>
 
-<h1>Portfolio</h1>
-<p>View your stock holdings and cash balance.</p>
+  <h1>Portfolio</h1>
+  <p class="small">Cash account + holdings with current market value.</p>
 
-<ul>
-  <li>Cash Balance: $10,000.00</li>
-  <li>AAPL – 10 shares</li>
-</ul>
+  <p id="status" class="small">Loading portfolio...</p>
 
-</body>
-</html>
+  <div class="card" id="summary"></div>
+  
+  <div class="card">
+  <h3>Cash Account</h3>
+
+  <div class="row">
+    <div class="col">
+      <label>Deposit Amount</label>
+      <input id="depositAmount" type="number" min="0.01" step="0.01" value="100.00" />
+      <button id="depositBtn">Deposit</button>
+    </div>
+
+    <div class="col">
+      <label>Withdraw Amount</label>
+      <input id="withdrawAmount" type="number" min="0.01" step="0.01" value="50.00" />
+      <button id="withdrawBtn">Withdraw</button>
+    </div>
+  </div>
+
+  <p id="cashMsg" class="small"></p>
+</div>
+
+  <h3>Holdings</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th>Shares</th>
+        <th>Avg Cost</th>
+        <th>Current Price</th>
+        <th>Market Value</th>
+      </tr>
+    </thead>
+    <tbody id="holdingsBody"></tbody>
+  </table>
+
+</div>
 
 <script src="../js/config.js"></script>
 <script src="../js/api.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+  const userId = getCurrentUserId();
+
+  async function loadPortfolio() {
+    try {
+      setStatus("status", "Loading portfolio...");
+      const p = await TradeSmartAPI.getPortfolio(userId);
+
+      document.getElementById("summary").innerHTML = `
+        <div><b>User:</b> ${p.userId}</div>
+        <div><b>Cash:</b> ${money(p.cash)}</div>
+        <div><b>Total Stock Value:</b> ${money(p.totalStockValue)}</div>
+        <div><b>Total Account Value:</b> ${money(p.totalAccountValue)}</div>
+      `;
+
+      const body = document.getElementById("holdingsBody");
+      body.innerHTML = "";
+
+      if (!p.holdings || p.holdings.length === 0) {
+        body.innerHTML = `<tr><td colspan="5">No holdings yet.</td></tr>`;
+      } else {
+        p.holdings.forEach(h => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${h.ticker}</td>
+            <td>${h.shares}</td>
+            <td>${money(h.avgCost)}</td>
+            <td>${money(h.currentPrice)}</td>
+            <td>${money(h.marketValue)}</td>
+          `;
+          body.appendChild(tr);
+        });
+      }
+
+      setStatus("status", "Portfolio loaded.", "success");
+    } catch (e) {
+      setStatus("status", e.message || "Failed to load portfolio", "error");
+    }
+  }
+
+  async function doDeposit() {
+    try {
+      setStatus("cashMsg", "Depositing...");
+      const amount = Number(document.getElementById("depositAmount").value);
+      const result = await TradeSmartAPI.depositCash({ userId, amount });
+      setStatus("cashMsg", result.message, "success");
+      await loadPortfolio();
+    } catch (e) {
+      setStatus("cashMsg", e.message || "Deposit failed", "error");
+    }
+  }
+
+  async function doWithdraw() {
+    try {
+      setStatus("cashMsg", "Withdrawing...");
+      const amount = Number(document.getElementById("withdrawAmount").value);
+      const result = await TradeSmartAPI.withdrawCash({ userId, amount });
+      setStatus("cashMsg", result.message, "success");
+      await loadPortfolio();
+    } catch (e) {
+      setStatus("cashMsg", e.message || "Withdraw failed", "error");
+    }
+  }
+
+  document.getElementById("depositBtn").addEventListener("click", doDeposit);
+  document.getElementById("withdrawBtn").addEventListener("click", doWithdraw);
+
+  loadPortfolio();
+
+  
+</script>
+</body>
+</html>

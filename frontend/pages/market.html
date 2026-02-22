@@ -1,52 +1,217 @@
-<script src="../js/config.js"></script>
-<script src="../js/api.js"></script>
-<script>
-  // Example: load stocks
-  TradeSmartAPI.getStocks().then(console.log).catch(console.error);
-</script>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Market - TradeSmart</title>
+  <link rel="stylesheet" href="../css/styles.css" />
 </head>
 <body>
+<div class="container">
 
-<nav>
-  <a href="../index.html">Home</a> |
-  <a href="market.html">Market</a> |
-  <a href="portfolio.html">Portfolio</a> |
-  <a href="transactions.html">Transactions</a> |
-  <a href="login.html">Login</a> |
-  <a href="register.html">Register</a> |
-  <a href="admin-create-stock.html">Admin: Create Stock</a> |
-  <a href="admin-market-hours.html">Admin: Market Hours</a> |
-  <a href="admin-market-schedule.html">Admin: Schedule</a>
-</nav>
+  <nav>
+    <a href="../index.html">Home</a> |
+    <a href="market.html">Market</a> |
+    <a href="portfolio.html">Portfolio</a> |
+    <a href="transactions.html">Transactions</a> |
+    <a href="login.html">Login</a> |
+    <a href="register.html">Register</a> |
+    <a href="admin-create-stock.html">Admin: Create Stock</a> |
+    <a href="admin-market-hours.html">Admin: Market Hours</a> |
+    <a href="admin-market-schedule.html">Admin: Schedule</a>
+  </nav>
 
-<hr>
+  <hr>
 
-<h1>Market</h1>
-<p>View available stocks and place trades.</p>
+  <h1>Market</h1>
+  <p class="small">Displays available stocks with price, volume, and market cap. Place buy/sell orders at market price.</p>
 
-<table border="1" cellpadding="8">
-  <thead>
-    <tr>
-      <th>Ticker</th>
-      <th>Price</th>
-      <th>Volume</th>
-      <th>Market Cap</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>AAPL</td>
-      <td>$182.34</td>
-      <td>1,000,000</td>
-      <td>$182,340,000</td>
-    </tr>
-  </tbody>
-</table>
+  <p id="status" class="small">Loading stocks...</p>
 
+  <div class="row">
+    <div class="col card">
+      <h3>Place Order</h3>
+
+      <label>Ticker</label>
+      <select id="tickerSelect"></select>
+
+      <label>Order Type</label>
+      <select id="orderType">
+        <option value="BUY">BUY</option>
+        <option value="SELL">SELL</option>
+      </select>
+
+      <label>Shares</label>
+      <input id="shares" type="number" min="1" value="1" />
+
+      <button id="placeOrderBtn">Place Order (PENDING)</button>
+      <p id="orderMsg" class="small"></p>
+
+      <button id="executeBtn">Execute Pending Orders (Mock)</button>
+      <p id="execMsg" class="small"></p>
+    </div>
+
+    <div class="col card">
+      <h3>Pending Orders</h3>
+      <p class="small">Orders are pending until executed. You can cancel pending orders.</p>
+      <div id="pendingList" class="small">No pending orders yet.</div>
+    </div>
+  </div>
+
+  <h3>Available Stocks</h3>
+  <table id="stocksTable">
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th>Company</th>
+        <th>Price</th>
+        <th>Open</th>
+        <th>High</th>
+        <th>Low</th>
+        <th>Volume</th>
+        <th>Market Cap</th>
+      </tr>
+    </thead>
+    <tbody id="stocksBody"></tbody>
+  </table>
+
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+  const userId = getCurrentUserId();
+  let latestStocks = [];
+
+  async function loadStocks() {
+    try {
+      setStatus("status", "Loading stocks...");
+      const stocks = await TradeSmartAPI.getStocks();
+      latestStocks = stocks;
+
+      // Fill table
+      const tbody = document.getElementById("stocksBody");
+      tbody.innerHTML = "";
+      stocks.forEach(s => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${s.ticker}</td>
+          <td>${s.companyName}</td>
+          <td>${money(s.price)}</td>
+          <td>${money(s.open)}</td>
+          <td>${money(s.high)}</td>
+          <td>${money(s.low)}</td>
+          <td>${s.volume.toLocaleString()}</td>
+          <td>${money(s.marketCap)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Fill ticker dropdown
+      const sel = document.getElementById("tickerSelect");
+      sel.innerHTML = "";
+      stocks.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.ticker;
+        opt.textContent = `${s.ticker} - ${s.companyName}`;
+        sel.appendChild(opt);
+      });
+
+      setStatus("status", "Stocks loaded.", "success");
+    } catch (e) {
+      setStatus("status", e.message || "Failed to load stocks", "error");
+    }
+  }
+
+  // We'll store pending orders in localStorage to display/cancel on the page
+  function getPendingOrders() {
+    return JSON.parse(localStorage.getItem("pendingOrders") || "[]");
+  }
+  function setPendingOrders(arr) {
+    localStorage.setItem("pendingOrders", JSON.stringify(arr));
+  }
+
+  function renderPending() {
+    const list = document.getElementById("pendingList");
+    const pending = getPendingOrders().filter(o => o.status === "PENDING");
+
+    if (pending.length === 0) {
+      list.innerHTML = "No pending orders yet.";
+      return;
+    }
+
+    list.innerHTML = pending.map(o => `
+      <div class="card" style="margin-top:8px;">
+        <div><b>${o.type}</b> ${o.ticker} | Shares: ${o.shares}</div>
+        <div class="small">Order ID: ${o.orderId}</div>
+        <div class="small">Requested: ${new Date(o.requestedAt).toLocaleString()}</div>
+        <button onclick="cancel('${o.orderId}')">Cancel</button>
+      </div>
+    `).join("");
+  }
+
+  async function placeOrder() {
+    const ticker = document.getElementById("tickerSelect").value;
+    const type = document.getElementById("orderType").value;
+    const shares = Number(document.getElementById("shares").value);
+
+    try {
+      setStatus("orderMsg", "Placing order...");
+      let result;
+      if (type === "BUY") result = await TradeSmartAPI.buyStock({ userId, ticker, shares });
+      else result = await TradeSmartAPI.sellStock({ userId, ticker, shares });
+
+      setStatus("orderMsg", result.message, "success");
+
+      // Save pending order locally for UI display/cancel
+      const all = getPendingOrders();
+      all.push(result.order);
+      setPendingOrders(all);
+      renderPending();
+
+    } catch (e) {
+      setStatus("orderMsg", e.message || "Order failed", "error");
+    }
+  }
+
+  async function cancel(orderId) {
+    try {
+      setStatus("orderMsg", "Canceling order...");
+      const result = await TradeSmartAPI.cancelOrder(orderId);
+
+      // Update local storage
+      const all = getPendingOrders().map(o => o.orderId === orderId ? result.order : o);
+      setPendingOrders(all);
+      renderPending();
+
+      setStatus("orderMsg", result.message, "success");
+    } catch (e) {
+      setStatus("orderMsg", e.message || "Cancel failed", "error");
+    }
+  }
+  window.cancel = cancel;
+
+  async function executePending() {
+    try {
+      setStatus("execMsg", "Executing pending orders...");
+      const result = await TradeSmartAPI.executePendingOrders(userId);
+
+      // Clear local pending orders (they become executed/rejected in mock API)
+      const all = getPendingOrders().map(o => ({ ...o, status: "EXECUTED" }));
+      setPendingOrders(all);
+      renderPending();
+
+      setStatus("execMsg", result.message, "success");
+    } catch (e) {
+      setStatus("execMsg", e.message || "Execution failed", "error");
+    }
+  }
+
+  document.getElementById("placeOrderBtn").addEventListener("click", placeOrder);
+  document.getElementById("executeBtn").addEventListener("click", executePending);
+
+  loadStocks().then(renderPending);
+</script>
 </body>
 </html>

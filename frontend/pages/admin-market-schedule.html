@@ -1,15 +1,61 @@
-<h1>Update Market Schedule</h1>
-<form>
-  <label>
-    <input type="checkbox"> Weekdays Only
-  </label><br><br>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin - Market Schedule</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+<div class="container">
 
-  <label>
-    <input type="checkbox"> Closed on Holidays
-  </label><br><br>
+  <nav>
+    <a href="../index.html">Home</a> |
+    <a href="admin-create-stock.html">Admin: Create Stock</a> |
+    <a href="admin-market-hours.html">Admin: Market Hours</a> |
+    <a href="admin-market-schedule.html">Admin: Schedule</a>
+  </nav>
 
-  <button>Save</button>
-</form>
+  <hr>
+
+  <h1>Admin: Market Schedule</h1>
+
+  <div class="card">
+    <label>
+      <input id="weekdaysOnly" type="checkbox" checked />
+      Market open weekdays only
+    </label>
+
+    <label>
+      <input id="closedHolidays" type="checkbox" checked />
+      Market closed on holidays
+    </label>
+
+    <button id="saveBtn">Save Market Schedule</button>
+    <p id="msg" class="small"></p>
+  </div>
+
+</div>
 
 <script src="../js/config.js"></script>
 <script src="../js/api.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+  async function saveSchedule() {
+    try {
+      setStatus("msg", "Saving schedule...");
+      const data = {
+        weekdaysOnly: document.getElementById("weekdaysOnly").checked,
+        closedHolidays: document.getElementById("closedHolidays").checked
+      };
+      const result = await TradeSmartAPI.adminUpdateMarketSchedule(data);
+      setStatus("msg", result.message, "success");
+    } catch (e) {
+      setStatus("msg", e.message || "Update failed", "error");
+    }
+  }
+
+  document.getElementById("saveBtn").addEventListener("click", saveSchedule);
+</script>
+</body>
+</html>

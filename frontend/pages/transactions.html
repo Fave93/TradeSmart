@@ -1,48 +1,84 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Transactions - TradeSmart</title>
+  <link rel="stylesheet" href="../css/styles.css" />
 </head>
 <body>
+<div class="container">
 
-<nav>
-  <a href="../index.html">Home</a> |
-  <a href="market.html">Market</a> |
-  <a href="portfolio.html">Portfolio</a> |
-  <a href="transactions.html">Transactions</a> |
-  <a href="login.html">Login</a> |
-  <a href="register.html">Register</a> |
-  <a href="admin-create-stock.html">Admin: Create Stock</a> |
-  <a href="admin-market-hours.html">Admin: Market Hours</a> |
-  <a href="admin-market-schedule.html">Admin: Schedule</a>
-</nav>
+  <nav>
+    <a href="../index.html">Home</a> |
+    <a href="market.html">Market</a> |
+    <a href="portfolio.html">Portfolio</a> |
+    <a href="transactions.html">Transactions</a>
+  </nav>
 
-<hr>
+  <hr>
 
-<h1>Transaction History</h1>
+  <h1>Transaction History</h1>
+  <p class="small">Shows executed/canceled transactions.</p>
 
-<table border="1" cellpadding="8">
-  <thead>
-    <tr>
-      <th>Type</th>
-      <th>Ticker</th>
-      <th>Shares</th>
-      <th>Price</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>BUY</td>
-      <td>AAPL</td>
-      <td>10</td>
-      <td>$175.00</td>
-    </tr>
-  </tbody>
-</table>
+  <p id="status" class="small">Loading transactions...</p>
 
-</body>
-</html>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Type</th>
+        <th>Ticker</th>
+        <th>Shares</th>
+        <th>Price</th>
+        <th>Total</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="txBody"></tbody>
+  </table>
+
+</div>
 
 <script src="../js/config.js"></script>
 <script src="../js/api.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+  const userId = getCurrentUserId();
+
+  async function loadTx() {
+    try {
+      setStatus("status", "Loading transactions...");
+      const tx = await TradeSmartAPI.getTransactions(userId);
+
+      const body = document.getElementById("txBody");
+      body.innerHTML = "";
+
+      if (!tx || tx.length === 0) {
+        body.innerHTML = `<tr><td colspan="7">No transactions yet.</td></tr>`;
+      } else {
+        tx.slice().reverse().forEach(t => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${new Date(t.timestamp).toLocaleString()}</td>
+            <td>${t.type}</td>
+            <td>${t.ticker}</td>
+            <td>${t.shares}</td>
+            <td>${money(t.price)}</td>
+            <td>${money(t.total)}</td>
+            <td>${t.status}</td>
+          `;
+          body.appendChild(tr);
+        });
+      }
+
+      setStatus("status", "Transactions loaded.", "success");
+    } catch (e) {
+      setStatus("status", e.message || "Failed to load transactions", "error");
+    }
+  }
+
+  loadTx();
+</script>
+</body>
+</html>

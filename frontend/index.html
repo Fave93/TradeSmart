@@ -1,24 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>TradeSmart Stock Trading System</title>
+  <meta charset="UTF-8" />
+  <title>TradeSmart - Home</title>
+  <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-<nav>
-  <a href="index.html">Home</a> |
-  <a href="pages/market.html">Market</a> |
-  <a href="pages/portfolio.html">Portfolio</a> |
-  <a href="pages/transactions.html">Transactions</a> |
-  <a href="pages/login.html">Login</a> |
-  <a href="pages/register.html">Register</a> |
-  <a href="pages/admin-create-stock.html">Admin: Create Stock</a> |
-  <a href="pages/admin-market-hours.html">Admin: Market Hours</a> |
-  <a href="pages/admin-market-schedule.html">Admin: Schedule</a>
-</nav>
+  <div class="container">
+    <nav>
+      <a href="index.html">Home</a> |
+      <a href="pages/market.html">Market</a> |
+      <a href="pages/portfolio.html">Portfolio</a> |
+      <a href="pages/transactions.html">Transactions</a> |
+      <a href="pages/login.html">Login</a> |
+      <a href="pages/register.html">Register</a> |
+      <a href="pages/admin-create-stock.html">Admin: Create Stock</a> |
+      <a href="pages/admin-market-hours.html">Admin: Market Hours</a> |
+      <a href="pages/admin-market-schedule.html">Admin: Schedule</a>
+    </nav>
 
-<hr>
+    <hr>
+
     <h1>TradeSmart Stock Trading System</h1>
-    <p>Frontend environment configured successfully.</p>
+    <p class="small">Plain HTML frontend with mock API integration.</p>
+
+    <div class="card">
+      <h3>Quick Start</h3>
+      <ol>
+        <li>Go to <b>Market</b> to see stocks.</li>
+        <li>Place a <b>Buy/Sell</b> order (it becomes <b>PENDING</b>).</li>
+        <li>Use <b>Execute Pending Orders</b> to simulate execution.</li>
+        <li>Check <b>Portfolio</b> and <b>Transactions</b>.</li>
+        <li>Use <b>Admin</b> pages to create stocks and update market rules.</li>
+      </ol>
+    </div>
+  </div>
+
+  <script src="js/ui.js"></script>
 </body>
 </html>

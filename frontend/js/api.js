@@ -8,7 +8,7 @@
    Configuration
 ------------------------------ */
 const USE_MOCK = true; // ✅ keep true until backend is ready
-const API_BASE_URL = "http://localhost:5000"; // change later if needed
+const API_BASE_URL = CONFIG.API_BASE_URL;// change later if needed
 
 /* -----------------------------
    Mock Data Store (in-memory)
@@ -315,6 +315,90 @@ async function getTransactions(userId) {
   return mockTransactions.filter((t) => t.userId === userId);
 }
 
+/**
+ * depositCash(data)
+ * data = { userId, amount }
+ * Deposits into user's cash account.
+ */
+async function depositCash(data) {
+  if (!USE_MOCK) {
+    const res = await fetch(`${API_BASE_URL}/users/${data.userId}/deposit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: data.amount }),
+    });
+    if (!res.ok) throw new Error("Failed to deposit cash");
+    return await res.json();
+  }
+
+  await delay();
+
+  const user = getUser(data.userId);
+  if (!user) throw new Error("User not found");
+
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Deposit amount must be greater than 0");
+
+  user.cash = Number((user.cash + amount).toFixed(2));
+
+  mockTransactions.push({
+    txId: newId("t"),
+    userId: user.userId,
+    type: "DEPOSIT",
+    ticker: "CASH",
+    shares: 0,
+    price: amount,
+    total: amount,
+    status: "EXECUTED",
+    timestamp: nowISO(),
+  });
+
+  return { message: `Deposited ${amount.toFixed(2)} to cash account`, cash: user.cash };
+}
+
+/**
+ * withdrawCash(data)
+ * data = { userId, amount }
+ * Withdraws from user's cash account.
+ */
+async function withdrawCash(data) {
+  if (!USE_MOCK) {
+    const res = await fetch(`${API_BASE_URL}/users/${data.userId}/withdraw`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: data.amount }),
+    });
+    if (!res.ok) throw new Error("Failed to withdraw cash");
+    return await res.json();
+  }
+
+  await delay();
+
+  const user = getUser(data.userId);
+  if (!user) throw new Error("User not found");
+
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Withdraw amount must be greater than 0");
+
+  if (user.cash < amount) throw new Error("Insufficient cash balance");
+
+  user.cash = Number((user.cash - amount).toFixed(2));
+
+  mockTransactions.push({
+    txId: newId("t"),
+    userId: user.userId,
+    type: "WITHDRAW",
+    ticker: "CASH",
+    shares: 0,
+    price: amount,
+    total: amount,
+    status: "EXECUTED",
+    timestamp: nowISO(),
+  });
+
+  return { message: `Withdrew ${amount.toFixed(2)} from cash account`, cash: user.cash };
+}
+
 /* -----------------------------
    API: Admin Functions
 ------------------------------ */
@@ -494,6 +578,10 @@ window.TradeSmartAPI = {
   cancelOrder,
   getPortfolio,
   getTransactions,
+  
+  depositCash,
+  withdrawCash,
+  
   adminCreateStock,
   adminUpdateMarketHours,
   adminUpdateMarketSchedule,
