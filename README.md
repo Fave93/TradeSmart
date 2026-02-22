@@ -1,0 +1,12 @@
+# TradeSmart Frontend (IFT401)
+
+## Run locally (recommended)
+1. Open the `frontend` folder in VS Code
+2. Install the "Live Server" extension
+3. Right-click `frontend/index.html` → "Open with Live Server"
+
+## Folder structure
+- frontend/index.html
+- frontend/pages/*.html
+- frontend/js/config.js
+- frontend/js/api.js
