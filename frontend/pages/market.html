@@ -1,0 +1,52 @@
+<script src="../js/config.js"></script>
+<script src="../js/api.js"></script>
+<script>
+  // Example: load stocks
+  TradeSmartAPI.getStocks().then(console.log).catch(console.error);
+</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Market - TradeSmart</title>
+</head>
+<body>
+
+<nav>
+  <a href="../index.html">Home</a> |
+  <a href="market.html">Market</a> |
+  <a href="portfolio.html">Portfolio</a> |
+  <a href="transactions.html">Transactions</a> |
+  <a href="login.html">Login</a> |
+  <a href="register.html">Register</a> |
+  <a href="admin-create-stock.html">Admin: Create Stock</a> |
+  <a href="admin-market-hours.html">Admin: Market Hours</a> |
+  <a href="admin-market-schedule.html">Admin: Schedule</a>
+</nav>
+
+<hr>
+
+<h1>Market</h1>
+<p>View available stocks and place trades.</p>
+
+<table border="1" cellpadding="8">
+  <thead>
+    <tr>
+      <th>Ticker</th>
+      <th>Price</th>
+      <th>Volume</th>
+      <th>Market Cap</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>AAPL</td>
+      <td>$182.34</td>
+      <td>1,000,000</td>
+      <td>$182,340,000</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>
