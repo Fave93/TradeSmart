@@ -1,0 +1,12 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Dependencies
+node_modules/
+
+# Build / Cache
+.gradle/
+build/
+out/
