@@ -6,6 +6,9 @@ Thumbs.db
 # Dependencies
 node_modules/
 
+# Environment variables
+.env
+
 # Build / Cache
 .gradle/
 build/

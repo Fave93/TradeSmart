@@ -1,14 +1,30 @@
 /*  api.js
-    TradeSmart Stock Trading System (Frontend Mock API)
-    - Uses mock data for now (no backend required)
-    - Later: switch USE_MOCK to false and point API_BASE_URL to your server
+    TradeSmart Stock Trading System (Frontend API Layer)
+
+    ✅ Supports BOTH modes:
+    - Mock mode (no backend needed) when CONFIG.USE_MOCK = true
+    - Backend mode (Zamir's API) when CONFIG.USE_MOCK = false
+
+    Notes:
+    - Requires config.js to define CONFIG.API_BASE_URL (e.g., http://localhost:5000)
+    - Zamir backend routes are root-based (no /api prefix), so CONFIG.API_PREFIX should be ""
 */
 
 /* -----------------------------
    Configuration
 ------------------------------ */
-const USE_MOCK = true; // ✅ keep true until backend is ready
-const API_BASE_URL = CONFIG.API_BASE_URL;// change later if needed
+const USE_MOCK =
+  typeof CONFIG !== "undefined" && typeof CONFIG.USE_MOCK === "boolean"
+    ? CONFIG.USE_MOCK
+    : true; // default mock ON
+
+const API_BASE_URL =
+  typeof CONFIG !== "undefined" && CONFIG.API_BASE_URL
+    ? CONFIG.API_BASE_URL
+    : "http://localhost:5000";
+
+const API_PREFIX =
+  typeof CONFIG !== "undefined" && CONFIG.API_PREFIX ? CONFIG.API_PREFIX : "";
 
 /* -----------------------------
    Mock Data Store (in-memory)
@@ -107,6 +123,35 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+/**
+ * apiFetch(path, options)
+ * - path should start with "/" (e.g., "/stocks")
+ * - Automatically applies API_BASE_URL + API_PREFIX
+ * - Throws readable errors (uses JSON {message} if provided)
+ */
+async function apiFetch(path, options = {}) {
+  const url = `${API_BASE_URL}${API_PREFIX}${path}`;
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!res.ok) {
+    const msg =
+      data && data.message ? data.message : `HTTP ${res.status} on ${path}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
 /* -----------------------------
    API: Customer Functions
 ------------------------------ */
@@ -117,9 +162,7 @@ function nowISO() {
  */
 async function getStocks() {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/stocks`);
-    if (!res.ok) throw new Error("Failed to fetch stocks");
-    return await res.json();
+    return await apiFetch("/stocks");
   }
 
   await delay();
@@ -135,13 +178,10 @@ async function getStocks() {
  */
 async function buyStock(order) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/orders/buy`, {
+    return await apiFetch("/orders/buy", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(order),
     });
-    if (!res.ok) throw new Error("Failed to buy stock");
-    return await res.json();
   }
 
   await delay();
@@ -173,7 +213,7 @@ async function buyStock(order) {
   mockOrders.push(pendingOrder);
 
   return {
-    message: "Buy order placed (PENDING)",
+    message: `Buy order created (PENDING): ${shares} shares of ${stock.ticker}`,
     order: pendingOrder,
   };
 }
@@ -184,13 +224,10 @@ async function buyStock(order) {
  */
 async function sellStock(order) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/orders/sell`, {
+    return await apiFetch("/orders/sell", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(order),
     });
-    if (!res.ok) throw new Error("Failed to sell stock");
-    return await res.json();
   }
 
   await delay();
@@ -205,7 +242,7 @@ async function sellStock(order) {
   if (!Number.isFinite(shares) || shares <= 0) throw new Error("Invalid shares");
 
   const holding = user.holdings.find((h) => h.ticker === stock.ticker);
-  if (!holding || holding.shares < shares) throw new Error("Not enough shares to sell");
+  if (!holding || holding.shares < shares) throw new Error("Not enough shares");
 
   // Create a PENDING order (can be canceled before executed)
   const orderId = newId("o");
@@ -222,22 +259,20 @@ async function sellStock(order) {
   mockOrders.push(pendingOrder);
 
   return {
-    message: "Sell order placed (PENDING)",
+    message: `Sell order created (PENDING): ${shares} shares of ${stock.ticker}`,
     order: pendingOrder,
   };
 }
 
 /**
  * cancelOrder(orderId)
- * Cancels a pending order before it gets executed.
+ * Cancels a pending order before executed.
  */
 async function cancelOrder(orderId) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/orders/${orderId}/cancel`, {
+    return await apiFetch(`/orders/${orderId}/cancel`, {
       method: "POST",
     });
-    if (!res.ok) throw new Error("Failed to cancel order");
-    return await res.json();
   }
 
   await delay();
@@ -248,7 +283,6 @@ async function cancelOrder(orderId) {
 
   order.status = "CANCELED";
 
-  // record transaction for history
   mockTransactions.push({
     txId: newId("t"),
     userId: order.userId,
@@ -266,13 +300,10 @@ async function cancelOrder(orderId) {
 
 /**
  * getPortfolio(userId)
- * Returns cash + holdings with current market value.
  */
 async function getPortfolio(userId) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/users/${userId}/portfolio`);
-    if (!res.ok) throw new Error("Failed to fetch portfolio");
-    return await res.json();
+    return await apiFetch(`/users/${userId}/portfolio`);
   }
 
   await delay();
@@ -281,8 +312,8 @@ async function getPortfolio(userId) {
   if (!user) throw new Error("User not found");
 
   const holdings = user.holdings.map((h) => {
-    const stock = findStock(h.ticker);
-    const currentPrice = stock ? stock.price : 0;
+    const s = findStock(h.ticker);
+    const currentPrice = s ? s.price : 0;
     const marketValue = Number((h.shares * currentPrice).toFixed(2));
     return { ...h, currentPrice, marketValue };
   });
@@ -291,24 +322,23 @@ async function getPortfolio(userId) {
     holdings.reduce((sum, h) => sum + h.marketValue, 0).toFixed(2)
   );
 
+  const totalAccountValue = Number((user.cash + totalStockValue).toFixed(2));
+
   return {
     userId: user.userId,
-    cash: Number(user.cash.toFixed(2)),
+    cash: user.cash,
     holdings,
     totalStockValue,
-    totalAccountValue: Number((user.cash + totalStockValue).toFixed(2)),
+    totalAccountValue,
   };
 }
 
 /**
  * getTransactions(userId)
- * Returns transaction history for user.
  */
 async function getTransactions(userId) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/users/${userId}/transactions`);
-    if (!res.ok) throw new Error("Failed to fetch transactions");
-    return await res.json();
+    return await apiFetch(`/users/${userId}/transactions`);
   }
 
   await delay();
@@ -318,17 +348,13 @@ async function getTransactions(userId) {
 /**
  * depositCash(data)
  * data = { userId, amount }
- * Deposits into user's cash account.
  */
 async function depositCash(data) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/users/${data.userId}/deposit`, {
+    return await apiFetch(`/users/${data.userId}/deposit`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ amount: data.amount }),
     });
-    if (!res.ok) throw new Error("Failed to deposit cash");
-    return await res.json();
   }
 
   await delay();
@@ -337,7 +363,8 @@ async function depositCash(data) {
   if (!user) throw new Error("User not found");
 
   const amount = Number(data.amount);
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Deposit amount must be greater than 0");
+  if (!Number.isFinite(amount) || amount <= 0)
+    throw new Error("Deposit amount must be greater than 0");
 
   user.cash = Number((user.cash + amount).toFixed(2));
 
@@ -359,17 +386,13 @@ async function depositCash(data) {
 /**
  * withdrawCash(data)
  * data = { userId, amount }
- * Withdraws from user's cash account.
  */
 async function withdrawCash(data) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/users/${data.userId}/withdraw`, {
+    return await apiFetch(`/users/${data.userId}/withdraw`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ amount: data.amount }),
     });
-    if (!res.ok) throw new Error("Failed to withdraw cash");
-    return await res.json();
   }
 
   await delay();
@@ -378,7 +401,8 @@ async function withdrawCash(data) {
   if (!user) throw new Error("User not found");
 
   const amount = Number(data.amount);
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Withdraw amount must be greater than 0");
+  if (!Number.isFinite(amount) || amount <= 0)
+    throw new Error("Withdraw amount must be greater than 0");
 
   if (user.cash < amount) throw new Error("Insufficient cash balance");
 
@@ -409,34 +433,25 @@ async function withdrawCash(data) {
  */
 async function adminCreateStock(stock) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/admin/stocks`, {
+    return await apiFetch("/admin/stocks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(stock),
     });
-    if (!res.ok) throw new Error("Failed to create stock");
-    return await res.json();
   }
 
   await delay();
 
   const ticker = stock.ticker.toUpperCase();
-  if (findStock(ticker)) throw new Error("Ticker already exists");
-
-  const volume = Number(stock.volume);
-  const initialPrice = Number(stock.initialPrice);
-
-  if (!Number.isFinite(volume) || volume <= 0) throw new Error("Invalid volume");
-  if (!Number.isFinite(initialPrice) || initialPrice <= 0) throw new Error("Invalid initial price");
+  if (findStock(ticker)) throw new Error("Stock ticker already exists");
 
   const newStock = {
     ticker,
     companyName: stock.companyName,
-    price: Number(initialPrice.toFixed(2)),
-    open: Number(initialPrice.toFixed(2)),
-    high: Number(initialPrice.toFixed(2)),
-    low: Number(initialPrice.toFixed(2)),
-    volume: Math.floor(volume),
+    price: Number(stock.initialPrice),
+    open: Number(stock.initialPrice),
+    high: Number(stock.initialPrice),
+    low: Number(stock.initialPrice),
+    volume: Number(stock.volume),
   };
 
   mockStocks.push(newStock);
@@ -445,97 +460,96 @@ async function adminCreateStock(stock) {
 
 /**
  * adminUpdateMarketHours(data)
- * data = { open: "09:30", close: "16:00", timezone?: "America/New_York" }
+ * data = { open, close, timezone }
  */
 async function adminUpdateMarketHours(data) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/admin/market/hours`, {
+    return await apiFetch("/admin/market/hours", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error("Failed to update market hours");
-    return await res.json();
   }
 
   await delay();
-
-  if (!data.open || !data.close) throw new Error("Open and Close times are required");
-  mockMarketConfig.marketHours.open = data.open;
-  mockMarketConfig.marketHours.close = data.close;
-  if (data.timezone) mockMarketConfig.marketHours.timezone = data.timezone;
-
+  mockMarketConfig.marketHours = { ...data };
   return { message: "Market hours updated", marketHours: mockMarketConfig.marketHours };
 }
 
 /**
  * adminUpdateMarketSchedule(data)
- * data = { weekdaysOnly: true/false, closedHolidays: true/false }
+ * data = { weekdaysOnly, closedHolidays }
  */
 async function adminUpdateMarketSchedule(data) {
   if (!USE_MOCK) {
-    const res = await fetch(`${API_BASE_URL}/admin/market/schedule`, {
+    return await apiFetch("/admin/market/schedule", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error("Failed to update market schedule");
-    return await res.json();
   }
 
   await delay();
-
-  if (typeof data.weekdaysOnly !== "boolean") throw new Error("weekdaysOnly must be boolean");
-  if (typeof data.closedHolidays !== "boolean") throw new Error("closedHolidays must be boolean");
-
-  mockMarketConfig.marketSchedule.weekdaysOnly = data.weekdaysOnly;
-  mockMarketConfig.marketSchedule.closedHolidays = data.closedHolidays;
-
+  mockMarketConfig.marketSchedule = { ...data };
   return { message: "Market schedule updated", marketSchedule: mockMarketConfig.marketSchedule };
 }
 
-/* -----------------------------
-   Optional: Execute Pending Orders (Mock)
-   Call this from UI to simulate execution.
------------------------------- */
+/**
+ * executePendingOrders(userId)
+ * OPTIONAL: mock-only helper for demo "execution"
+ */
 async function executePendingOrders(userId) {
+  if (!USE_MOCK) {
+    throw new Error(
+      "executePendingOrders is mock-only. Use real backend execution logic instead."
+    );
+  }
+
   await delay();
 
   const user = getUser(userId);
   if (!user) throw new Error("User not found");
 
+  // Execute all pending orders for this user
   const pending = mockOrders.filter((o) => o.userId === userId && o.status === "PENDING");
-  if (pending.length === 0) return { message: "No pending orders", executed: [] };
 
-  const executed = [];
-
-  for (const order of pending) {
+  pending.forEach((order) => {
     const stock = findStock(order.ticker);
-    if (!stock) continue;
+    if (!stock) {
+      order.status = "REJECTED";
+      return;
+    }
 
-    const executionPrice = stock.price;
-    const total = Number((order.shares * executionPrice).toFixed(2));
+    const total = Number((order.shares * stock.price).toFixed(2));
 
     if (order.type === "BUY") {
       if (user.cash >= total) {
         user.cash = Number((user.cash - total).toFixed(2));
         const holding = user.holdings.find((h) => h.ticker === stock.ticker);
         if (holding) {
-          // naive avg cost update
           const newTotalShares = holding.shares + order.shares;
-          const newTotalCost = holding.avgCost * holding.shares + executionPrice * order.shares;
+          const newAvgCost =
+            (holding.avgCost * holding.shares + stock.price * order.shares) / newTotalShares;
           holding.shares = newTotalShares;
-          holding.avgCost = Number((newTotalCost / newTotalShares).toFixed(2));
+          holding.avgCost = Number(newAvgCost.toFixed(2));
         } else {
-          user.holdings.push({ ticker: stock.ticker, shares: order.shares, avgCost: executionPrice });
+          user.holdings.push({ ticker: stock.ticker, shares: order.shares, avgCost: stock.price });
         }
+
         order.status = "EXECUTED";
+        mockTransactions.push({
+          txId: newId("t"),
+          userId,
+          type: "BUY",
+          ticker: stock.ticker,
+          shares: order.shares,
+          price: stock.price,
+          total,
+          status: "EXECUTED",
+          timestamp: nowISO(),
+        });
       } else {
         order.status = "REJECTED";
       }
-    }
-
-    if (order.type === "SELL") {
+    } else if (order.type === "SELL") {
       const holding = user.holdings.find((h) => h.ticker === stock.ticker);
       if (holding && holding.shares >= order.shares) {
         holding.shares -= order.shares;
@@ -543,28 +557,26 @@ async function executePendingOrders(userId) {
         if (holding.shares === 0) {
           user.holdings = user.holdings.filter((h) => h.ticker !== stock.ticker);
         }
+
         order.status = "EXECUTED";
+        mockTransactions.push({
+          txId: newId("t"),
+          userId,
+          type: "SELL",
+          ticker: stock.ticker,
+          shares: order.shares,
+          price: stock.price,
+          total,
+          status: "EXECUTED",
+          timestamp: nowISO(),
+        });
       } else {
         order.status = "REJECTED";
       }
     }
+  });
 
-    mockTransactions.push({
-      txId: newId("t"),
-      userId: user.userId,
-      type: order.type,
-      ticker: order.ticker,
-      shares: order.shares,
-      price: executionPrice,
-      total,
-      status: order.status,
-      timestamp: nowISO(),
-    });
-
-    executed.push({ ...order });
-  }
-
-  return { message: "Pending orders processed", executed };
+  return { message: `Executed ${pending.length} pending orders (mock)`, executedCount: pending.length };
 }
 
 /* -----------------------------
@@ -578,10 +590,10 @@ window.TradeSmartAPI = {
   cancelOrder,
   getPortfolio,
   getTransactions,
-  
+
   depositCash,
   withdrawCash,
-  
+
   adminCreateStock,
   adminUpdateMarketHours,
   adminUpdateMarketSchedule,
