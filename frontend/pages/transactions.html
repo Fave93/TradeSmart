@@ -18,7 +18,7 @@
   <hr>
 
   <h1>Transaction History</h1>
-  <p class="small">Shows executed/canceled transactions.</p>
+  <p class="small">Shows transaction records from the database.</p>
 
   <p id="status" class="small">Loading transactions...</p>
 
@@ -30,8 +30,7 @@
         <th>Ticker</th>
         <th>Shares</th>
         <th>Price</th>
-        <th>Total</th>
-        <th>Status</th>
+        <th>Amount</th>
       </tr>
     </thead>
     <tbody id="txBody"></tbody>
@@ -49,24 +48,23 @@
   async function loadTx() {
     try {
       setStatus("status", "Loading transactions...");
-      const tx = await TradeSmartAPI.getTransactions(userId);
 
+      const tx = await API.getTransactions(userId);
       const body = document.getElementById("txBody");
       body.innerHTML = "";
 
       if (!tx || tx.length === 0) {
-        body.innerHTML = `<tr><td colspan="7">No transactions yet.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="6">No transactions yet.</td></tr>`;
       } else {
-        tx.slice().reverse().forEach(t => {
+        tx.forEach(t => {
           const tr = document.createElement("tr");
           tr.innerHTML = `
-            <td>${new Date(t.timestamp).toLocaleString()}</td>
-            <td>${t.type}</td>
-            <td>${t.ticker}</td>
-            <td>${t.shares}</td>
-            <td>${money(t.price)}</td>
-            <td>${money(t.total)}</td>
-            <td>${t.status}</td>
+            <td>${t.created_at ? new Date(t.created_at).toLocaleString() : ""}</td>
+            <td>${t.transaction_type || ""}</td>
+            <td>${t.symbol || "-"}</td>
+            <td>${t.quantity ?? "-"}</td>
+            <td>${t.price != null ? money(t.price) : "-"}</td>
+            <td>${t.amount != null ? money(t.amount) : "-"}</td>
           `;
           body.appendChild(tr);
         });

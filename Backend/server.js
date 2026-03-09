@@ -1,515 +1,538 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const { v4: uuidv4 } = require("uuid");
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
 
-const pool = require("./db");
-const { marketStatusNow } = require("./market");
+const pool = require('./db');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --------------------
-// HEALTH
-// --------------------
-app.get("/health", (req, res) => res.json({ ok: true, message: "TradeSmart backend running" }));
+const PORT = process.env.PORT || 5000;
 
-// --------------------
-// STOCKS (frontend calls GET /stocks)
-// --------------------
-app.get("/stocks", async (req, res) => {
+app.get('/health', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({ status: 'ok', db: 'connected', time: result.rows[0].now });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.get('/stocks', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT ticker,
-              company_name AS "companyName",
-              price,
-              open,
-              high,
-              low,
-              volume,
-              market_cap AS "marketCap"
-       FROM stocks
-       ORDER BY ticker`
+      'SELECT stock_id, symbol, company_name, price FROM stocks ORDER BY symbol'
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ message: "DB error", error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// --------------------
-// CASH ACCOUNT
-// POST /users/:userId/deposit  { amount }
-// POST /users/:userId/withdraw { amount }
-// --------------------
-app.post("/users/:userId/deposit", async (req, res) => {
-  const { userId } = req.params;
-  const amount = Number(req.body.amount);
+app.post('/users/:id/deposit', async (req, res) => {
+  const { id } = req.params;
+  const { amount } = req.body;
 
-  if (!amount || amount <= 0) return res.status(400).json({ message: "Invalid amount" });
-
-  try {
-    // ensure user exists
-    await pool.query(
-      `INSERT INTO users (user_id, full_name, role, cash)
-       VALUES ($1, $2, 'customer', 0)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [userId, "Auto Created User"]
-    );
-
-    const r = await pool.query(
-      `UPDATE users SET cash = cash + $1 WHERE user_id=$2 RETURNING cash`,
-      [amount, userId]
-    );
-
-    // log transaction
-    await pool.query(
-      `INSERT INTO transactions (tx_id, user_id, type, ticker, shares, price, total, status)
-       VALUES ($1,$2,'DEPOSIT','CASH',0,0,$3,'EXECUTED')`,
-      [uuidv4(), userId, amount]
-    );
-
-    res.json({ message: `Deposited ${amount.toFixed(2)} to cash account`, cash: Number(r.rows[0].cash) });
-  } catch (err) {
-    res.status(500).json({ message: "Deposit failed", error: err.message });
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: 'Invalid deposit amount' });
   }
-});
-
-app.post("/users/:userId/withdraw", async (req, res) => {
-  const { userId } = req.params;
-  const amount = Number(req.body.amount);
-
-  if (!amount || amount <= 0) return res.status(400).json({ message: "Invalid amount" });
 
   const client = await pool.connect();
+
   try {
-    await client.query("BEGIN");
+    await client.query('BEGIN');
 
-    const balRes = await client.query(`SELECT cash FROM users WHERE user_id=$1 FOR UPDATE`, [userId]);
-    if (balRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "User not found" });
+    const userCheck = await client.query(
+      'SELECT * FROM users WHERE user_id = $1',
+      [id]
+    );
+
+    if (userCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    const cash = Number(balRes.rows[0].cash);
-    if (cash < amount) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Insufficient funds" });
-    }
-
-    const upd = await client.query(
-      `UPDATE users SET cash = cash - $1 WHERE user_id=$2 RETURNING cash`,
-      [amount, userId]
+    await client.query(
+      'UPDATE users SET cash_balance = cash_balance + $1 WHERE user_id = $2',
+      [Number(amount), id]
     );
 
     await client.query(
-      `INSERT INTO transactions (tx_id, user_id, type, ticker, shares, price, total, status)
-       VALUES ($1,$2,'WITHDRAW','CASH',0,0,$3,'EXECUTED')`,
-      [uuidv4(), userId, -amount]
+      `INSERT INTO transactions (user_id, transaction_type, amount)
+       VALUES ($1, 'deposit', $2)`,
+      [id, Number(amount)]
     );
 
-    await client.query("COMMIT");
-    res.json({ message: `Withdrew ${amount.toFixed(2)} from cash account`, cash: Number(upd.rows[0].cash) });
+    await client.query('COMMIT');
+    res.json({ message: 'Deposit successful' });
   } catch (err) {
-    await client.query("ROLLBACK");
-    res.status(500).json({ message: "Withdraw failed", error: err.message });
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
-// --------------------
-// PORTFOLIO (frontend calls GET /users/:userId/portfolio)
-// --------------------
-app.get("/users/:userId/portfolio", async (req, res) => {
-  const { userId } = req.params;
+app.post('/users/:id/withdraw', async (req, res) => {
+  const { id } = req.params;
+  const { amount } = req.body;
+
+  if (!amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: 'Invalid withdrawal amount' });
+  }
+
+  const client = await pool.connect();
 
   try {
-    const userRes = await pool.query(`SELECT cash FROM users WHERE user_id=$1`, [userId]);
-    if (userRes.rowCount === 0) return res.status(404).json({ message: "User not found" });
+    await client.query('BEGIN');
 
-    const cash = Number(userRes.rows[0].cash);
+    const userResult = await client.query(
+      'SELECT cash_balance FROM users WHERE user_id = $1',
+      [id]
+    );
 
-    const holdRes = await pool.query(
-      `SELECT h.ticker,
-              h.shares,
-              h.avg_cost AS "avgCost",
-              s.price AS "currentPrice",
-              (h.shares * s.price) AS "marketValue"
-       FROM holdings h
-       JOIN stocks s ON s.ticker=h.ticker
-       WHERE h.user_id=$1
-       ORDER BY h.ticker`,
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const currentBalance = Number(userResult.rows[0].cash_balance);
+
+    if (currentBalance < Number(amount)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient funds' });
+    }
+
+    await client.query(
+      'UPDATE users SET cash_balance = cash_balance - $1 WHERE user_id = $2',
+      [Number(amount), id]
+    );
+
+    await client.query(
+      `INSERT INTO transactions (user_id, transaction_type, amount)
+       VALUES ($1, 'withdraw', $2)`,
+      [id, Number(amount)]
+    );
+
+    await client.query('COMMIT');
+    res.json({ message: 'Withdrawal successful' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/orders/buy', async (req, res) => {
+  const { userId, ticker, shares } = req.body;
+
+  if (!userId || !ticker || !shares || Number(shares) <= 0) {
+    return res.status(400).json({ error: 'userId, ticker, and valid shares are required' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query(
+      'SELECT user_id, cash_balance FROM users WHERE user_id = $1',
       [userId]
     );
 
-    const holdings = holdRes.rows.map(h => ({
-      ...h,
-      shares: Number(h.shares),
-      avgCost: Number(h.avgCost),
-      currentPrice: Number(h.currentPrice),
-      marketValue: Number(h.marketValue),
-    }));
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    const totalStockValue = holdings.reduce((sum, h) => sum + h.marketValue, 0);
-    const totalAccountValue = cash + totalStockValue;
+    const stockResult = await client.query(
+      'SELECT stock_id, symbol, company_name, price FROM stocks WHERE UPPER(symbol) = UPPER($1)',
+      [ticker]
+    );
+
+    if (stockResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Stock not found' });
+    }
+
+    const stock = stockResult.rows[0];
+    const qty = Number(shares);
+    const price = Number(stock.price);
+    const totalCost = qty * price;
+    const currentCash = Number(userResult.rows[0].cash_balance);
+
+    if (currentCash < totalCost) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient funds' });
+    }
+
+    await client.query(
+      'UPDATE users SET cash_balance = cash_balance - $1 WHERE user_id = $2',
+      [totalCost, userId]
+    );
+
+    const holdingResult = await client.query(
+      'SELECT holding_id, quantity FROM holdings WHERE user_id = $1 AND stock_id = $2',
+      [userId, stock.stock_id]
+    );
+
+    if (holdingResult.rows.length === 0) {
+      await client.query(
+        'INSERT INTO holdings (user_id, stock_id, quantity) VALUES ($1, $2, $3)',
+        [userId, stock.stock_id, qty]
+      );
+    } else {
+      await client.query(
+        'UPDATE holdings SET quantity = quantity + $1 WHERE holding_id = $2',
+        [qty, holdingResult.rows[0].holding_id]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO transactions (user_id, stock_id, transaction_type, quantity, price, amount)
+       VALUES ($1, $2, 'buy', $3, $4, $5)`,
+      [userId, stock.stock_id, qty, price, totalCost]
+    );
+
+    await client.query('COMMIT');
 
     res.json({
-      userId,
-      cash,
-      holdings,
-      totalStockValue,
-      totalAccountValue,
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Portfolio error", error: err.message });
-  }
-});
-
-// --------------------
-// ORDERS (frontend uses POST /orders/buy, /orders/sell, /orders/:id/cancel)
-// We'll EXECUTE immediately (simple + works with rubric).
-// --------------------
-app.post("/orders/buy", async (req, res) => {
-  const { userId, ticker, shares } = req.body;
-  const qty = Number(shares);
-
-  if (!userId || !ticker || !qty || qty <= 0) return res.status(400).json({ message: "Invalid request" });
-
-  const market = await marketStatusNow();
-  if (!market.open) return res.status(403).json({ message: `Market closed: ${market.reason}` });
-
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // lock user cash
-    const userRes = await client.query(`SELECT cash FROM users WHERE user_id=$1 FOR UPDATE`, [userId]);
-    if (userRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "User not found" });
-    }
-    const cash = Number(userRes.rows[0].cash);
-
-    // get stock price
-    const stockRes = await client.query(`SELECT price FROM stocks WHERE ticker=$1`, [ticker]);
-    if (stockRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Stock not found" });
-    }
-    const price = Number(stockRes.rows[0].price);
-
-    const totalCost = price * qty;
-    if (cash < totalCost) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Insufficient cash balance" });
-    }
-
-    // create order (pending)
-    const orderId = `o-${uuidv4()}`;
-    await client.query(
-      `INSERT INTO orders (order_id, user_id, type, ticker, shares, status, price_at_request)
-       VALUES ($1,$2,'BUY',$3,$4,'PENDING',$5)`,
-      [orderId, userId, ticker, qty, price]
-    );
-
-    // EXECUTE immediately: deduct cash, update holdings, log tx, mark order executed
-    await client.query(`UPDATE users SET cash = cash - $1 WHERE user_id=$2`, [totalCost, userId]);
-
-    await client.query(
-      `INSERT INTO holdings (user_id, ticker, shares, avg_cost)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (user_id, ticker)
-       DO UPDATE SET
-         avg_cost = ((holdings.avg_cost * holdings.shares) + ($4 * $3)) / (holdings.shares + $3),
-         shares = holdings.shares + $3`,
-      [userId, ticker, qty, price]
-    );
-
-    await client.query(
-      `INSERT INTO transactions (tx_id, user_id, type, ticker, shares, price, total, status)
-       VALUES ($1,$2,'BUY',$3,$4,$5,$6,'EXECUTED')`,
-      [uuidv4(), userId, ticker, qty, price, totalCost]
-    );
-
-    await client.query(`UPDATE orders SET status='EXECUTED' WHERE order_id=$1`, [orderId]);
-
-    await client.query("COMMIT");
-
-    res.json({
-      message: "Buy order placed (PENDING)",
+      message: `Buy order executed: ${qty} shares of ${stock.symbol}`,
       order: {
-        orderId,
-        userId,
-        type: "BUY",
-        ticker,
+        type: 'BUY',
+        ticker: stock.symbol,
         shares: qty,
-        requestedAt: new Date().toISOString(),
-        status: "PENDING",
-        priceAtRequest: price,
-      },
+        price,
+        total: totalCost,
+        status: 'EXECUTED'
+      }
     });
   } catch (err) {
-    await client.query("ROLLBACK");
-    res.status(500).json({ message: "Buy failed", error: err.message });
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
   } finally {
     client.release();
   }
 });
 
-app.post("/orders/sell", async (req, res) => {
+app.post('/orders/sell', async (req, res) => {
   const { userId, ticker, shares } = req.body;
-  const qty = Number(shares);
 
-  if (!userId || !ticker || !qty || qty <= 0) return res.status(400).json({ message: "Invalid request" });
-
-  const market = await marketStatusNow();
-  if (!market.open) return res.status(403).json({ message: `Market closed: ${market.reason}` });
+  if (!userId || !ticker || !shares || Number(shares) <= 0) {
+    return res.status(400).json({ error: 'userId, ticker, and valid shares are required' });
+  }
 
   const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // lock holding
-    const holdRes = await client.query(
-      `SELECT shares FROM holdings WHERE user_id=$1 AND ticker=$2 FOR UPDATE`,
-      [userId, ticker]
-    );
-    if (holdRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "No shares to sell" });
-    }
-    const owned = Number(holdRes.rows[0].shares);
-    if (owned < qty) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Insufficient shares" });
-    }
-
-    const stockRes = await client.query(`SELECT price FROM stocks WHERE ticker=$1`, [ticker]);
-    if (stockRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Stock not found" });
-    }
-    const price = Number(stockRes.rows[0].price);
-
-    const proceeds = price * qty;
-
-    const orderId = `o-${uuidv4()}`;
-    await client.query(
-      `INSERT INTO orders (order_id, user_id, type, ticker, shares, status, price_at_request)
-       VALUES ($1,$2,'SELL',$3,$4,'PENDING',$5)`,
-      [orderId, userId, ticker, qty, price]
-    );
-
-    // execute
-    await client.query(
-      `UPDATE holdings SET shares = shares - $1 WHERE user_id=$2 AND ticker=$3`,
-      [qty, userId, ticker]
-    );
-    await client.query(`DELETE FROM holdings WHERE user_id=$1 AND ticker=$2 AND shares=0`, [userId, ticker]);
-
-    await client.query(`UPDATE users SET cash = cash + $1 WHERE user_id=$2`, [proceeds, userId]);
-
-    await client.query(
-      `INSERT INTO transactions (tx_id, user_id, type, ticker, shares, price, total, status)
-       VALUES ($1,$2,'SELL',$3,$4,$5,$6,'EXECUTED')`,
-      [uuidv4(), userId, ticker, qty, price, proceeds]
-    );
-
-    await client.query(`UPDATE orders SET status='EXECUTED' WHERE order_id=$1`, [orderId]);
-
-    await client.query("COMMIT");
-
-    res.json({
-      message: "Sell order placed (PENDING)",
-      order: {
-        orderId,
-        userId,
-        type: "SELL",
-        ticker,
-        shares: qty,
-        requestedAt: new Date().toISOString(),
-        status: "PENDING",
-        priceAtRequest: price,
-      },
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    res.status(500).json({ message: "Sell failed", error: err.message });
-  } finally {
-    client.release();
-  }
-});
-
-// Cancel order (we'll allow cancel if still pending; if executed, return executed)
-app.post("/orders/:orderId/cancel", async (req, res) => {
-  const { orderId } = req.params;
 
   try {
-    const r = await pool.query(`SELECT * FROM orders WHERE order_id=$1`, [orderId]);
-    if (r.rowCount === 0) return res.status(404).json({ message: "Order not found" });
+    await client.query('BEGIN');
 
-    const order = r.rows[0];
-
-    if (order.status !== "PENDING") {
-      return res.json({
-        message: `Order already ${order.status}`,
-        order: {
-          orderId: order.order_id,
-          userId: order.user_id,
-          type: order.type,
-          ticker: order.ticker,
-          shares: order.shares,
-          requestedAt: order.requested_at,
-          status: order.status,
-          priceAtRequest: Number(order.price_at_request),
-        },
-      });
-    }
-
-    await pool.query(`UPDATE orders SET status='CANCELED' WHERE order_id=$1`, [orderId]);
-
-    res.json({
-      message: "Order canceled",
-      order: {
-        orderId: order.order_id,
-        userId: order.user_id,
-        type: order.type,
-        ticker: order.ticker,
-        shares: Number(order.shares),
-        requestedAt: order.requested_at,
-        status: "CANCELED",
-        priceAtRequest: Number(order.price_at_request),
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Cancel failed", error: err.message });
-  }
-});
-
-// --------------------
-// TRANSACTIONS (frontend calls GET /users/:userId/transactions)
-// --------------------
-app.get("/users/:userId/transactions", async (req, res) => {
-  const { userId } = req.params;
-
-  try {
-    const r = await pool.query(
-      `SELECT tx_id AS "txId",
-              user_id AS "userId",
-              type,
-              ticker,
-              shares,
-              price,
-              total,
-              status,
-              timestamp
-       FROM transactions
-       WHERE user_id=$1
-       ORDER BY timestamp DESC`,
+    const userResult = await client.query(
+      'SELECT user_id FROM users WHERE user_id = $1',
       [userId]
     );
 
-    // make sure numbers are numbers
-    const tx = r.rows.map(t => ({
-      ...t,
-      shares: Number(t.shares),
-      price: Number(t.price),
-      total: Number(t.total),
-    }));
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    res.json(tx);
+    const stockResult = await client.query(
+      'SELECT stock_id, symbol, company_name, price FROM stocks WHERE UPPER(symbol) = UPPER($1)',
+      [ticker]
+    );
+
+    if (stockResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Stock not found' });
+    }
+
+    const stock = stockResult.rows[0];
+    const qty = Number(shares);
+    const price = Number(stock.price);
+    const totalProceeds = qty * price;
+
+    const holdingResult = await client.query(
+      'SELECT holding_id, quantity FROM holdings WHERE user_id = $1 AND stock_id = $2',
+      [userId, stock.stock_id]
+    );
+
+    if (holdingResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No shares owned for this stock' });
+    }
+
+    const currentQty = Number(holdingResult.rows[0].quantity);
+
+    if (currentQty < qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Not enough shares to sell' });
+    }
+
+    if (currentQty === qty) {
+      await client.query(
+        'DELETE FROM holdings WHERE holding_id = $1',
+        [holdingResult.rows[0].holding_id]
+      );
+    } else {
+      await client.query(
+        'UPDATE holdings SET quantity = quantity - $1 WHERE holding_id = $2',
+        [qty, holdingResult.rows[0].holding_id]
+      );
+    }
+
+    await client.query(
+      'UPDATE users SET cash_balance = cash_balance + $1 WHERE user_id = $2',
+      [totalProceeds, userId]
+    );
+
+    await client.query(
+      `INSERT INTO transactions (user_id, stock_id, transaction_type, quantity, price, amount)
+       VALUES ($1, $2, 'sell', $3, $4, $5)`,
+      [userId, stock.stock_id, qty, price, totalProceeds]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: `Sell order executed: ${qty} shares of ${stock.symbol}`,
+      order: {
+        type: 'SELL',
+        ticker: stock.symbol,
+        shares: qty,
+        price,
+        total: totalProceeds,
+        status: 'EXECUTED'
+      }
+    });
   } catch (err) {
-    res.status(500).json({ message: "Transactions error", error: err.message });
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
-// --------------------
-// ADMIN ENDPOINTS
-// --------------------
-app.post("/admin/stocks", async (req, res) => {
-  const { companyName, ticker, volume, initialPrice } = req.body;
+app.post('/admin/stocks', async (req, res) => {
+  const { companyName, ticker, initialPrice } = req.body;
 
-  if (!companyName || !ticker || !initialPrice) {
-    return res.status(400).json({ message: "Missing fields" });
+  if (!companyName || !ticker || !initialPrice || Number(initialPrice) <= 0) {
+    return res.status(400).json({ error: 'companyName, ticker, and valid initialPrice are required' });
   }
 
   try {
-    const price = Number(initialPrice);
-    const vol = Number(volume || 0);
-
-    // simple initial open/high/low = price
-    await pool.query(
-      `INSERT INTO stocks (ticker, company_name, price, open, high, low, volume, market_cap)
-       VALUES ($1,$2,$3,$3,$3,$3,$4,$5)
-       ON CONFLICT (ticker) DO NOTHING`,
-      [ticker.toUpperCase(), companyName, price, vol, vol * price]
+    const result = await pool.query(
+      `INSERT INTO stocks (symbol, company_name, price)
+       VALUES ($1, $2, $3)
+       RETURNING stock_id, symbol, company_name, price`,
+      [ticker.toUpperCase(), companyName, Number(initialPrice)]
     );
 
-    const r = await pool.query(
-      `SELECT ticker,
-              company_name AS "companyName",
-              price, open, high, low, volume,
-              market_cap AS "marketCap"
-       FROM stocks WHERE ticker=$1`,
-      [ticker.toUpperCase()]
-    );
-
-    res.json({ message: "Stock created", stock: r.rows[0] });
+    res.json({
+      message: 'Stock created successfully',
+      stock: result.rows[0]
+    });
   } catch (err) {
-    res.status(500).json({ message: "Create stock failed", error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.put("/admin/market/hours", async (req, res) => {
-  const { open, close, timezone } = req.body;
+app.post('/admin/market-hours', async (req, res) => {
+  const { open, close } = req.body;
 
-  if (!open || !close || !timezone) {
-    return res.status(400).json({ message: "Missing open/close/timezone" });
+  if (!open || !close) {
+    return res.status(400).json({ error: 'open and close times are required' });
   }
 
   try {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE market_config
-       SET open_time=$1, close_time=$2, timezone=$3
-       WHERE id=1`,
-      [open, close, timezone]
+       SET open_time = $1,
+           close_time = $2
+       WHERE config_id = 1
+       RETURNING config_id, open_time, close_time`,
+      [open, close]
     );
 
     res.json({
-      message: "Market hours updated",
-      marketHours: { open, close, timezone },
+      message: 'Market hours updated successfully',
+      marketHours: result.rows[0]
     });
   } catch (err) {
-    res.status(500).json({ message: "Update market hours failed", error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.put("/admin/market/schedule", async (req, res) => {
+app.post('/admin/market-schedule', async (req, res) => {
   const { weekdaysOnly, closedHolidays } = req.body;
 
-  if (typeof weekdaysOnly !== "boolean" || typeof closedHolidays !== "boolean") {
-    return res.status(400).json({ message: "weekdaysOnly and closedHolidays must be boolean" });
-  }
-
   try {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE market_config
-       SET weekdays_only=$1, closed_holidays=$2
-       WHERE id=1`,
-      [weekdaysOnly, closedHolidays]
+       SET is_weekday_only = $1,
+           holidays = $2
+       WHERE config_id = 1
+       RETURNING config_id, is_weekday_only, holidays`,
+      [Boolean(weekdaysOnly), Boolean(closedHolidays) ? 'closed' : '']
     );
 
     res.json({
-      message: "Market schedule updated",
-      marketSchedule: { weekdaysOnly, closedHolidays },
+      message: 'Market schedule updated successfully',
+      marketSchedule: result.rows[0]
     });
   } catch (err) {
-    res.status(500).json({ message: "Update market schedule failed", error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// --------------------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));
+app.post('/auth/register', async (req, res) => {
+  const { fullName, username, email, password } = req.body;
+
+  if (!fullName || !username || !email || !password) {
+    return res.status(400).json({ error: 'fullName, username, email, and password are required' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const existingUser = await client.query(
+      `SELECT user_id
+       FROM users
+       WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)`,
+      [username, email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Username or email already exists' });
+    }
+
+    const idResult = await client.query(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING(user_id FROM 2) AS INTEGER)), 1000) + 1 AS next_id
+       FROM users
+       WHERE user_id ~ '^u[0-9]+$'`
+    );
+
+    const newUserId = `u${idResult.rows[0].next_id}`;
+
+    const result = await client.query(
+      `INSERT INTO users (user_id, full_name, username, email, password_hash, cash_balance)
+       VALUES ($1, $2, $3, $4, $5, 0)
+       RETURNING user_id, full_name, username, email, cash_balance`,
+      [newUserId, fullName, username, email, password]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Registration successful',
+      user: result.rows[0]
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  const { usernameOrEmail, password } = req.body;
+
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ error: 'usernameOrEmail and password are required' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT user_id, full_name, username, email, password_hash
+       FROM users
+       WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)
+       LIMIT 1`,
+      [usernameOrEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid username/email or password' });
+    }
+
+    const user = result.rows[0];
+
+    if (user.password_hash !== password) {
+      return res.status(401).json({ error: 'Invalid username/email or password' });
+    }
+
+    res.json({
+      message: 'Login successful',
+      user: {
+        user_id: user.user_id,
+        full_name: user.full_name,
+        username: user.username,
+        email: user.email,
+        role: user.username.toLowerCase() === 'admin' ? 'admin' : 'customer'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/users/:id/portfolio', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const userResult = await pool.query(
+      'SELECT user_id, full_name, cash_balance FROM users WHERE user_id = $1',
+      [id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const holdingsResult = await pool.query(
+      `SELECT h.holding_id, s.symbol, s.company_name, s.price, h.quantity,
+              (s.price * h.quantity) AS total_value
+       FROM holdings h
+       JOIN stocks s ON h.stock_id = s.stock_id
+       WHERE h.user_id = $1
+       ORDER BY s.symbol`,
+      [id]
+    );
+
+    res.json({
+      user: userResult.rows[0],
+      holdings: holdingsResult.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/users/:id/transactions', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT t.transaction_id, t.transaction_type, t.quantity, t.price, t.amount,
+              t.created_at, s.symbol
+       FROM transactions t
+       LEFT JOIN stocks s ON t.stock_id = s.stock_id
+       WHERE t.user_id = $1
+       ORDER BY t.created_at DESC`,
+      [id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});

@@ -16,26 +16,68 @@
 
   <hr>
 
-  <h1>Register (Mock Placeholder)</h1>
-  <p class="small">Registration UI placeholder (backend not implemented yet).</p>
+  <h1>Register</h1>
+  <p class="small">Create a new TradeSmart account.</p>
 
   <div class="card">
-    <label>Full Name</label>
-    <input type="text" placeholder="Full name" />
+    <label for="fullName">Full Name</label>
+    <input id="fullName" type="text" placeholder="Full name" />
 
-    <label>Username</label>
-    <input type="text" placeholder="Username" />
+    <label for="username">Username</label>
+    <input id="username" type="text" placeholder="Username" />
 
-    <label>Email</label>
-    <input type="email" placeholder="Email" />
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="Email" />
 
-    <label>Password</label>
-    <input type="password" placeholder="Password" />
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Password" />
 
-    <button type="button">Create Account</button>
-    <p class="small">(In mock mode, account creation is not persisted.)</p>
+    <button id="registerBtn" type="button">Create Account</button>
+    <p id="msg" class="small"></p>
   </div>
 
 </div>
+
+<script src="../js/config.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ui.js"></script>
+
+<script>
+  async function doRegister() {
+    try {
+      setStatus("msg", "Creating account...");
+
+      const fullName = document.getElementById("fullName").value.trim();
+      const username = document.getElementById("username").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!fullName || !username || !email || !password) {
+        setStatus("msg", "All fields are required.", "error");
+        return;
+      }
+
+      const result = await API.registerUser({
+        fullName,
+        username,
+        email,
+        password
+      });
+
+      setCurrentUserId(result.user.user_id);
+      setRole(result.user.role || "customer");
+
+      setStatus("msg", result.message, "success");
+
+      setTimeout(() => {
+        window.location.href = "market.html";
+      }, 700);
+    } catch (e) {
+      setStatus("msg", e.message || "Registration failed", "error");
+    }
+  }
+
+  document.getElementById("registerBtn").addEventListener("click", doRegister);
+</script>
 </body>
 </html>

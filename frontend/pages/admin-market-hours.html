@@ -20,13 +20,13 @@
   <h1>Admin: Market Hours</h1>
 
   <div class="card">
-    <label>Open Time</label>
+    <label for="openTime">Open Time</label>
     <input id="openTime" type="time" value="09:30" />
 
-    <label>Close Time</label>
+    <label for="closeTime">Close Time</label>
     <input id="closeTime" type="time" value="16:00" />
 
-    <button id="saveBtn">Save Market Hours</button>
+    <button id="saveBtn" type="button">Save Market Hours</button>
     <p id="msg" class="small"></p>
   </div>
 
@@ -40,13 +40,17 @@
   async function saveHours() {
     try {
       setStatus("msg", "Saving market hours...");
-      const data = {
-        open: document.getElementById("openTime").value,
-        close: document.getElementById("closeTime").value,
-        timezone: "America/New_York"
-      };
-      const result = await TradeSmartAPI.adminUpdateMarketHours(data);
-      setStatus("msg", result.message + ` (Open ${result.marketHours.open} - Close ${result.marketHours.close})`, "success");
+
+      const open = document.getElementById("openTime").value;
+      const close = document.getElementById("closeTime").value;
+
+      if (!open || !close) {
+        setStatus("msg", "Enter both open and close times.", "error");
+        return;
+      }
+
+      const result = await API.adminUpdateMarketHours({ open, close });
+      setStatus("msg", result.message, "success");
     } catch (e) {
       setStatus("msg", e.message || "Update failed", "error");
     }

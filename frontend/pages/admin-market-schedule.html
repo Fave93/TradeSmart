@@ -30,7 +30,7 @@
       Market closed on holidays
     </label>
 
-    <button id="saveBtn">Save Market Schedule</button>
+    <button id="saveBtn" type="button">Save Market Schedule</button>
     <p id="msg" class="small"></p>
   </div>
 
@@ -44,11 +44,12 @@
   async function saveSchedule() {
     try {
       setStatus("msg", "Saving schedule...");
-      const data = {
+
+      const result = await API.adminUpdateMarketSchedule({
         weekdaysOnly: document.getElementById("weekdaysOnly").checked,
         closedHolidays: document.getElementById("closedHolidays").checked
-      };
-      const result = await TradeSmartAPI.adminUpdateMarketSchedule(data);
+      });
+
       setStatus("msg", result.message, "success");
     } catch (e) {
       setStatus("msg", e.message || "Update failed", "error");
