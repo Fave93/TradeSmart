@@ -86,13 +86,31 @@
       const cash = Number(user.cash_balance || 0);
       const totalAccountValue = cash + totalStockValue;
 
-      document.getElementById("summary").innerHTML = `
-        <div><b>User ID:</b> ${user.user_id || userId}</div>
-        <div><b>Name:</b> ${user.full_name || "N/A"}</div>
-        <div><b>Cash:</b> ${money(cash)}</div>
-        <div><b>Total Stock Value:</b> ${money(totalStockValue)}</div>
-        <div><b>Total Account Value:</b> ${money(totalAccountValue)}</div>
-      `;
+   document.getElementById("summary").innerHTML = `
+  <h3>Account Summary</h3>
+  <div class="summary-grid">
+    <div class="summary-box">
+      <div class="label">User ID</div>
+      <div class="value">${user.user_id || userId}</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Name</div>
+      <div class="value">${user.full_name || "N/A"}</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Cash Balance</div>
+      <div class="value">${money(cash)}</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Stock Value</div>
+      <div class="value">${money(totalStockValue)}</div>
+    </div>
+    <div class="summary-box">
+      <div class="label">Account Total</div>
+      <div class="value">${money(totalAccountValue)}</div>
+    </div>
+  </div>
+`;
 
       const body = document.getElementById("holdingsBody");
       body.innerHTML = "";
